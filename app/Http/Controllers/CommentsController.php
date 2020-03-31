@@ -9,7 +9,6 @@ use App\Events\IssueEvent;
 use App\Http\Requests;
 use App\Http\Controllers\Controller;
 
-use App\Acl\Acl;
 use Sentinel;
 use DB;
 use App\Project\Provider;
@@ -30,7 +29,7 @@ class CommentsController extends Controller
             ->orderBy('created_at', $sort)
             ->get();
 
-        return Response()->json([ 'ecode' => 0, 'data' => parent::arrange($comments) ]);
+        return Response()->json([ 'ecode' => 0, 'data' => parent::arrange($comments), 'options' => [ 'current_time' => time() ] ]);
     }
 
     /**
@@ -41,8 +40,13 @@ class CommentsController extends Controller
      */
     public function store(Request $request, $project_key, $issue_id)
     {
+        if (!$this->isPermissionAllowed($project_key, 'add_comments')) 
+        {
+            return Response()->json(['ecode' => -10002, 'emsg' => 'permission denied.']);
+        }
+
         $contents = $request->input('contents');
-        if (!$contents || trim($contents) == '')
+        if (!$contents)
         {
             throw new \UnexpectedValueException('the contents can not be empty.', -11200);
         }
@@ -90,7 +94,7 @@ class CommentsController extends Controller
         $contents = $request->input('contents');
         if (isset($contents))
         {
-            if (!$contents || trim($contents) == '')
+            if (!$contents)
             {
                 throw new \UnexpectedValueException('the contents can not be empty.', -11200);
             }
@@ -114,9 +118,14 @@ class CommentsController extends Controller
 
             if ($operation == 'addReply') 
             {
+                if (!$this->isPermissionAllowed($project_key, 'add_comments')) 
+                {
+                    return Response()->json(['ecode' => -10002, 'emsg' => 'permission denied.']);
+                }
+
                 $reply_id = md5(microtime() . $this->user->id); 
-                array_push($comments['reply'], array_only($request->all(), [ 'contents', 'atWho', 'to' ]) + [ 'id' => $reply_id , 'creator' => $user, 'created_at' => time() ]);
-                $changedComments = array_only($request->all(), [ 'contents', 'atWho', 'to' ]);
+                array_push($comments['reply'], array_only($request->all(), [ 'contents', 'atWho' ]) + [ 'id' => $reply_id , 'creator' => $user, 'created_at' => time() ]);
+                $changedComments = array_only($request->all(), [ 'contents', 'atWho' ]) + [ 'to' => $comments['creator'] ];
             } 
             else if ($operation == 'editReply')
             {
@@ -128,13 +137,13 @@ class CommentsController extends Controller
                 $index = $this->array_find([ 'id' => $reply_id ], $comments['reply']); 
                 if ($index !== false) 
                 {
-                    if (!Acl::isAllowed($this->user->id, 'manage_project', $project_key) && $comments['reply'][$index]['creator']['id'] !== $this->user->id) 
+                    if (!$this->isPermissionAllowed($project_key, 'edit_comments') && !($comments['reply'][$index]['creator']['id'] == $this->user->id && $this->isPermissionAllowed($project_key, 'edit_self_comments')))
                     {
                         return Response()->json(['ecode' => -10002, 'emsg' => 'permission denied.']);
                     }
                
                     $comments['reply'][$index] = array_merge($comments['reply'][$index], [ 'updated_at' => time(), 'edited_flag' => 1 ] + array_only($request->all(), [ 'contents', 'atWho' ]));
-                    $changedComments = array_only($comments['reply'][$index], [ 'contents', 'atWho', 'to' ]);
+                    $changedComments = array_only($comments['reply'][$index], [ 'contents', 'atWho' ]) + [ 'to' => $comments['creator'] ];
                 }
                 else
                 {
@@ -151,12 +160,12 @@ class CommentsController extends Controller
                 $index = $this->array_find([ 'id' => $reply_id ], $comments['reply']); 
                 if ($index !== false) 
                 {
-                    if (!Acl::isAllowed($this->user->id, 'manage_project', $project_key) && $comments['reply'][$index]['creator']['id'] !== $this->user->id) 
+                    if (!$this->isPermissionAllowed($project_key, 'delete_comments') && !($comments['reply'][$index]['creator']['id'] == $this->user->id && $this->isPermissionAllowed($project_key, 'delete_self_comments')))
                     {
                         return Response()->json(['ecode' => -10002, 'emsg' => 'permission denied.']);
                     }
 
-                    $changedComments = array_only($comments['reply'][$index], [ 'contents', 'atWho', 'to' ]);
+                    $changedComments = array_only($comments['reply'][$index], [ 'contents', 'atWho' ]) + [ 'to' => $comments['creator'] ];
                     array_splice($comments['reply'], $index, 1);
                 }
                 else
@@ -168,7 +177,7 @@ class CommentsController extends Controller
         }
         else
         {
-            if (!Acl::isAllowed($this->user->id, 'manage_project', $project_key) && $comments['creator']['id'] !== $this->user->id) 
+            if (!$this->isPermissionAllowed($project_key, 'edit_comments') && !($comments['creator']['id'] == $this->user->id && $this->isPermissionAllowed($project_key, 'edit_self_comments')))
             {
                 return Response()->json(['ecode' => -10002, 'emsg' => 'permission denied.']);
             }
@@ -209,7 +218,7 @@ class CommentsController extends Controller
             throw new \UnexpectedValueException('the comments does not exist or is not in the project.', -11201);
         }
 
-        if (!Acl::isAllowed($this->user->id, 'manage_project', $project_key) && $comments['creator']['id'] !== $this->user->id) 
+        if (!$this->isPermissionAllowed($project_key, 'manage_project') && !($comments['creator']['id'] == $this->user->id && $this->isPermissionAllowed($project_key, 'delete_self_comments'))) 
         {
             return Response()->json(['ecode' => -10002, 'emsg' => 'permission denied.']);
         }

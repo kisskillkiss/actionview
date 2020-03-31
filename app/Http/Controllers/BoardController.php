@@ -117,7 +117,7 @@ $example = [
     public function store(Request $request, $project_key)
     {
         $name = $request->input('name');
-        if (!$name || trim($name) == '')
+        if (!$name)
         {
             throw new \UnexpectedValueException('the name can not be empty.', -11600);
         }
@@ -179,7 +179,7 @@ $example = [
         $name = $request->input('name');
         if (isset($name))
         {
-            if (!$name || trim($name) == '')
+            if (!$name)
             {
                 throw new \UnexpectedValueException('the name can not be empty.', -11600);
             }
@@ -209,6 +209,12 @@ $example = [
         if (isset($columns))
         {
             $updValues['columns'] = $columns;
+        }
+
+        $display_fields = $request->input('display_fields');
+        if (isset($display_fields))
+        {
+            $updValues['display_fields'] = $display_fields ?: [];
         }
 
         //$subtask = $request->input('subtask');

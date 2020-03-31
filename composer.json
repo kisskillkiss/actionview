@@ -2,7 +2,7 @@
     "name": "lxerxa/actionview",
     "description": "actionview application.",
     "keywords": ["actionview", "laravel"],
-    "license": "GPL",
+    "license": "Apache-2.0",
     "type": "project",
     "require": {
         "php": ">=5.5.9",
@@ -10,7 +10,8 @@
         "jenssegers/mongodb": "^3.0",
         "cartalyst/sentinel": "^2.0",
         "maatwebsite/excel": "^2.1",
-        "adldap2/adldap2": "^8.1"
+        "adldap2/adldap2": "^8.1",
+        "chumper/zipper": "^1.0"
     },
     "require-dev": {
         "fzaninotto/faker": "~1.4",
@@ -41,11 +42,11 @@
         ],
         "post-install-cmd": [
             "Illuminate\\Foundation\\ComposerScripts::postInstall",
-            "php artisan optimize"
+            "composer dump-autoload --no-dev --optimize"
         ],
         "post-update-cmd": [
             "Illuminate\\Foundation\\ComposerScripts::postUpdate",
-            "php artisan optimize"
+            "composer dump-autoload --no-dev --optimize"
         ]
     },
     "config": {

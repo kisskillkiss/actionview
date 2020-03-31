@@ -22,6 +22,10 @@ use App\Project\Eloquent\Version;
 use App\Project\Eloquent\Module;
 use App\Project\Eloquent\Epic;
 use App\Project\Eloquent\Sprint;
+use App\Project\Eloquent\Labels;
+use App\Project\Eloquent\UserIssueFilters;
+use App\Project\Eloquent\UserIssueListColumns;
+use App\Project\Eloquent\ProjectIssueListColumns;
 
 use Cartalyst\Sentinel\Users\EloquentUser;
 use Sentinel;
@@ -40,6 +44,91 @@ class Provider {
     {
         $project = Project::where('key', $project_key)->first()->toArray();
         return $project && isset($project['principal']) ? $project['principal'] : [];
+    }
+
+    /**
+     * get the project default filters.
+     *
+     * @return array
+     */
+    public static function getDefaultIssueFilters()
+    {
+        return [
+            [ 'id' => 'all', 'name' => '全部问题', 'query' => [] ],
+            [ 'id' => 'unresolved', 'name' => '未解决的', 'query' => [ 'resolution' => 'Unresolved' ] ],
+            [ 'id' => 'assigned_to_me', 'name' => '分配给我的', 'query' => [ 'assignee' => 'me', 'resolution' => 'Unresolved' ] ],
+            [ 'id' => 'watched', 'name' => '我关注的', 'query' => [ 'watcher' => 'me' ] ],
+            [ 'id' => 'reported', 'name' => '我报告的', 'query' => [ 'reporter' => 'me' ] ],
+            [ 'id' => 'recent_created', 'name' => '最近增加的', 'query' => [ 'created_at' => '2w' ] ],
+            [ 'id' => 'recent_updated', 'name' => '最近更新的', 'query' => [ 'updated_at' => '2w' ] ],
+            [ 'id' => 'recent_resolved', 'name' => '最近解决的', 'query' => [ 'resolved_at' => '2w' ] ],
+            [ 'id' => 'recent_closed', 'name' => '最近关闭的', 'query' => [ 'closed_at' => '2w' ] ],
+        ];
+    }
+
+    /**
+     * get the project filters.
+     *
+     * @param  string $project_key
+     * @param  string $user_id
+     * @return array
+     */
+    public static function getIssueFilters($project_key, $user_id)
+    {
+        // default issue filters
+        $filters = self::getDefaultIssueFilters();
+
+        $res = UserIssueFilters::where('project_key', $project_key)
+            ->where('user', $user_id)
+            ->first(); 
+        if ($res)
+        {
+            $filters = isset($res->filters) ? $res->filters : [];
+        }
+        return $filters;
+    }
+
+    /**
+     * get the issue list default columns.
+     *
+     * @return array
+     */
+    public static function getDefaultDisplayColumns($project_key)
+    {
+        $res = ProjectIssueListColumns::where('project_key', $project_key)->first(); 
+        if ($res)
+        {
+            $columns = isset($res->columns) ? $res->columns : [];
+            return $columns;
+        }
+
+        return [
+            [ 'key' => 'assignee', 'width' => '100' ],
+            [ 'key' => 'priority', 'width' => '70' ],
+            [ 'key' => 'state', 'width' => '100' ],
+            [ 'key' => 'resolution', 'width' => '100' ],
+        ];
+    }
+
+    /**
+     * get the issue list columns.
+     *
+     * @param  string $project_key
+     * @param  string $user_id
+     * @return array
+     */
+    public static function getIssueDisplayColumns($project_key, $user_id)
+    {
+        // default issue filters
+        $columns = self::getDefaultDisplayColumns($project_key);
+        $res = UserIssueListColumns::where('project_key', $project_key)
+            ->where('user', $user_id)
+            ->first(); 
+        if ($res)
+        {
+            $columns = isset($res->columns) ? $res->columns : [];
+        }
+        return $columns;
     }
 
     /**
@@ -92,11 +181,33 @@ class Provider {
         foreach ($states as $state)
         {
             $tmp = [];
-            $tmp['_id'] = isset($state['key']) ? $state['key'] : $state['_id'];
-            $tmp['name'] = isset($state['name']) ? $state['name'] : '';
+            $tmp['_id'] = isset($state['key']) && $state['key'] ? $state['key'] : $state['_id'];
+            $tmp['name'] = isset($state['name']) ? trim($state['name']) : '';
             $tmp['category'] = isset($state['category']) ? $state['category'] : '';
             $options[] = $tmp;
         }
+        return $options;
+    }
+
+    /**
+     * get state options.
+     *
+     * @param string $project_key
+     * @param array $fields
+     * @return collection
+     */
+    public static function getLabelOptions($project_key)
+    {
+        $options = [];
+
+        $labels = Labels::Where('project_key', $project_key)
+            ->orderBy('_id', 'desc')
+            ->get();
+        foreach ($labels as $label)
+        {
+            $options[] = $label->name;
+        }
+
         return $options;
     }
 
@@ -138,7 +249,7 @@ class Provider {
 
             $tmp = [];
             $tmp['_id'] = isset($event['key']) ? $event['key'] : $event['_id'];
-            $tmp['name'] = isset($event['name']) ? $event['name'] : '';
+            $tmp['name'] = isset($event['name']) ? trim($event['name']) : '';
             $options[] = $tmp;
         }
 
@@ -166,7 +277,7 @@ class Provider {
             ->Where('default', true)
             ->first();
 
-        $default = $priority && isset($priority->key) ? $priority->key : $priority->id;
+        $default = $priority && isset($priority->key) && $priority->key ? $priority->key : $priority->id;
         return $default; 
     }
 
@@ -234,8 +345,8 @@ class Provider {
         foreach ($priorities as $priority)
         {
             $tmp = [];
-            $tmp['_id'] = isset($priority['key']) ? $priority['key'] : $priority['_id'];
-            $tmp['name'] = isset($priority['name']) ? $priority['name'] : '';
+            $tmp['_id'] = isset($priority['key']) && $priority['key'] ? $priority['key'] : $priority['_id'];
+            $tmp['name'] = isset($priority['name']) ? trim($priority['name']) : '';
             if (isset($priority['default']))
             {
                 $tmp['default'] = $priority['default'];
@@ -270,7 +381,7 @@ class Provider {
             ->Where('default', true)
             ->first();
 
-        $default = $resolution && isset($resolution->key) ? $resolution->key : $resolution->id;
+        $default = $resolution && isset($resolution->key) && $resolution->key ? $resolution->key : $resolution->id;
         return $default;
     }
 
@@ -338,8 +449,8 @@ class Provider {
         foreach ($resolutions as $resolution)
         {
             $tmp = [];
-            $tmp['_id'] = isset($resolution['key']) ? $resolution['key'] : $resolution['_id'];
-            $tmp['name'] = isset($resolution['name']) ? $resolution['name'] : '';
+            $tmp['_id'] = isset($resolution['key']) && $resolution['key'] ? $resolution['key'] : $resolution['_id'];
+            $tmp['name'] = isset($resolution['name']) ? trim($resolution['name']) : '';
             if (isset($resolution['default']))
             {
                 $tmp['default'] = $resolution['default'];
@@ -469,7 +580,7 @@ class Provider {
             $groups = Group::find($group_ids);
             foreach($groups as $group)
             {
-                $user_ids = array_merge($user_ids, $group->users);
+                $user_ids = array_merge($user_ids, isset($group->users) && $group->users ? $group->users : []);
             }
         }
         $user_ids = array_unique($user_ids);
@@ -520,8 +631,11 @@ class Provider {
      */
     public static function getVersionList($project_key, $fields=[])
     {
-        $versions = Version::whereRaw([ 'project_key' => $project_key ])
-            ->orderBy('_id', 'desc')
+        $versions = Version::where([ 'project_key' => $project_key ])
+            ->orderBy('status', 'desc')
+            ->orderBy('released_time', 'desc')
+            ->orderBy('end_time', 'desc')
+            ->orderBy('created_at', 'desc')
             ->get($fields);
 
         return $versions;
@@ -536,11 +650,11 @@ class Provider {
      */
     public static function getModuleList($project_key, $fields=[])
     {
-        $versions = Module::where([ 'project_key' => $project_key ])
+        $modules = Module::where([ 'project_key' => $project_key ])
             ->orderBy('sn', 'asc')
             ->get($fields);
 
-        return $versions;
+        return $modules;
     }
 
     /**
@@ -635,12 +749,18 @@ class Provider {
      */
     public static function isFieldKeyExisted($project_key, $key)
     {
-        $isExisted = Resolution::Where('project_key', '$_sys_$')
+        $fields = Field::Where('project_key', '$_sys_$')
             ->orWhere('project_key', $project_key)
-            ->Where('key', $key)
-            ->exists();
+            ->get();
+        foreach ($fields as $field)
+        {
+            if ($field->key === $key || ($field->type === 'MutiUser' && $field->key . '_ids' === $key) || ($field->type === 'TimeTracking' && $field->key . '_m' === $key))
+            {
+                return true;
+            }
+        }
 
-        return $isExisted;
+        return false;
     }
 
     /**
@@ -730,21 +850,14 @@ class Provider {
                     unset($val['optionValues'][$k]['email']);
                 }
             }
-            else if ($val['key'] == 'module')
+            else if ($val['key'] == 'labels')
             {
-                if (!isset($options['module']))
+                $couple_labels = [];
+                foreach ($options['labels'] as $label)
                 {
-                    $options['module'] = self::getModuleList($project_key);
+                    $couple_labels[] = [ 'id' => $label, 'name' => $label ];
                 }
-                $val['optionValues'] = self::pluckFields($options['module'], ['_id', 'name']);
-            }
-            else if ($val['key'] == 'epic')
-            {
-                if (!isset($options['epic']))
-                {
-                    $options['epic'] = self::getEpicList($project_key);
-                }
-                $val['optionValues'] = self::pluckFields($options['epic'], ['_id', 'name', 'bgColor']);
+                $val['optionValues'] = $couple_labels;
             }
             else if (array_key_exists($val['key'], $options))
             {
@@ -927,6 +1040,16 @@ class Provider {
                 $epics = self::getEpicList($project_key);
                 $val['optionValues'] = self::pluckFields($epics, ['_id', 'name', 'bgColor']);
             }
+            else if ($val['key'] == 'labels')
+            {
+                $labels = self::getLabelOptions($project_key);
+                $couple_labels = [];
+                foreach ($labels as $label)
+                {
+                    $couple_labels[] = [ 'id' => $label, 'name' => $label ];
+                }
+                $val['optionValues'] = $couple_labels;
+            }
             else if ($val['type'] == 'SingleVersion' || $val['type'] == 'MultiVersion')
             {
                 $versions === null && $versions = self::getVersionList($project_key);
@@ -983,7 +1106,7 @@ class Provider {
             $schema = [];
             if ($change_fields)
             {
-                $out_schema_fields = [ 'type', 'state', 'resolution', 'priority', 'assignee', 'parent_id' ];
+                $out_schema_fields = [ 'type', 'state', 'resolution', 'priority', 'assignee', 'labels', 'parent_id', 'progress', 'expect_start_time', 'expect_complete_time' ];
                 if (array_diff($change_fields, $out_schema_fields))
                 {
                     $schema = self::getSchemaByType($issue['type']);
@@ -997,7 +1120,7 @@ class Provider {
 
         foreach ($schema as $field)
         {
-            if ($field['key'] === 'assignee' || ($change_fields && !in_array($field['key'], $change_fields)))
+            if (in_array($field['key'], [ 'assignee', 'progress' ]) || ($change_fields && !in_array($field['key'], $change_fields)))
             {
                 continue;
             }
@@ -1058,8 +1181,7 @@ class Provider {
                 }
                 else if ($field['type'] == 'DatePicker' || $field['type'] == 'DateTimePicker')
                 {
-                    $val['value'] = $issue[$field['key']] ? date($field['type'] == 'DatePicker' ? 'y/m/d' : 'y/m/d H:i:s', $issue[$field['key']]) : $issue[$field['key']];
-                    
+                    $val['value'] = $issue[$field['key']] ? date($field['type'] == 'DatePicker' ? 'Y/m/d' : 'Y/m/d H:i:s', $issue[$field['key']]) : $issue[$field['key']];
                 }
                 else
                 {
@@ -1075,7 +1197,7 @@ class Provider {
         if (in_array('type', $change_fields) || !isset($snap_data['type']))
         {
             $type = Type::find($issue['type']);
-            $snap_data['type'] = [ 'value' => $type->name, 'name' => '类型' ];
+            $snap_data['type'] = [ 'value' => isset($type->name) ? $type->name : '', 'name' => '类型' ];
         }
 
         if (isset($issue['priority']))
@@ -1085,7 +1207,7 @@ class Provider {
                 if (in_array('priority', $change_fields) || !isset($snap_data['priority']))
                 {
                     $priority = Priority::Where('key', $issue['priority'])->orWhere('_id', $issue['priority'])->first();
-                    $snap_data['priority'] = [ 'value' => $priority->name, 'name' => '优先级' ];
+                    $snap_data['priority'] = [ 'value' => isset($priority->name) ? $priority->name : '', 'name' => '优先级' ];
                 }
             }
             else
@@ -1101,7 +1223,7 @@ class Provider {
                 if (in_array('state', $change_fields) || !isset($snap_data['state']))
                 {
                     $state = State::Where('key', $issue['state'])->orWhere('_id', $issue['state'])->first();
-                    $snap_data['state'] = [ 'value' => $state->name, 'name' => '状态' ];
+                    $snap_data['state'] = [ 'value' => isset($state->name) ? $state->name : '', 'name' => '状态' ];
                 }
             }
             else
@@ -1117,7 +1239,7 @@ class Provider {
                 if (in_array('resolution', $change_fields) || !isset($snap_data['resolution']))
                 {
                     $resolution = Resolution::Where('key', $issue['resolution'])->orWhere('_id', $issue['resolution'])->first();
-                    $snap_data['resolution'] = [ 'value' => $resolution->name, 'name' => '解决结果' ];
+                    $snap_data['resolution'] = [ 'value' => isset($resolution->name) ? $resolution->name : '', 'name' => '解决结果' ];
                 }
             }
             else
@@ -1140,6 +1262,21 @@ class Provider {
                 $snap_data['assignee'] = [ 'value' => '', 'name' => '经办人' ];
             }
         }
+        // labels
+        if (isset($issue['labels']))
+        {
+            if ($issue['labels'])
+            {
+                if (in_array('labels', $change_fields) || !isset($snap_data['labels']))
+                {
+                    $snap_data['labels'] = [ 'value' => implode(',', $issue['labels']), 'name' => '标签' ];
+                }
+            }
+            else
+            {
+                $snap_data['labels'] = [ 'value' => '', 'name' => '标签' ];
+            }
+        }
 
         // special fields handle
         if (isset($issue['parent_id']))
@@ -1155,6 +1292,51 @@ class Provider {
             else
             {
                 $snap_data['parent'] = [ 'value' => '', 'name' => '父任务' ];
+            }
+        }
+
+        if (isset($issue['progress']))
+        {
+            if ($issue['progress'] || $issue['progress'] === 0)
+            {
+                if (in_array('progress', $change_fields) || !isset($snap_data['progress']))
+                {
+                    $snap_data['progress'] = [ 'value' => $issue['progress'] . '%', 'name' => '进度' ];
+                }
+            }
+            else
+            {
+                $snap_data['progress'] = [ 'value' => '', 'name' => '进度' ];
+            }
+        }
+
+        if (isset($issue['expect_start_time']))
+        {
+            if ($issue['expect_start_time'])
+            {
+                if (in_array('expect_start_time', $change_fields) || !isset($snap_data['expect_start_time']))
+                {
+                    $snap_data['expect_start_time'] = [ 'value' => date('Y/m/d', $issue['expect_start_time']), 'name' => '期望开始时间' ];
+                }
+            }
+            else
+            {
+                $snap_data['expect_start_time'] = [ 'value' => date('Y/m/d', $issue['expect_start_time']), 'name' => '期望开始时间' ];
+            }
+        }
+
+        if (isset($issue['expect_complete_time']))
+        {
+            if ($issue['expect_complete_time'])
+            {
+                if (in_array('expect_complete_time', $change_fields) || !isset($snap_data['expect_complete_time']))
+                {
+                    $snap_data['expect_complete_time'] = [ 'value' => date('Y/m/d', $issue['expect_complete_time']), 'name' => '期望完成时间' ];
+                }
+            }
+            else
+            {
+                $snap_data['expect_complete_time'] = [ 'value' => '', 'name' => '期望完成时间' ];
             }
         }
 

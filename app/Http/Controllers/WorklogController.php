@@ -10,10 +10,12 @@ use App\Http\Requests;
 use App\Http\Controllers\Controller;
 use App\Project\Eloquent\Worklog;
 use App\Project\Provider;
-use App\Acl\Acl;
 
 class WorklogController extends Controller
 {
+
+    use TimeTrackTrait;
+
     /**
      * Display a listing of the resource.
      *
@@ -27,7 +29,7 @@ class WorklogController extends Controller
             ->where('issue_id', $issue_id)
             ->orderBy('recorded_at', $sort)
             ->get();
-        return Response()->json(['ecode' => 0, 'data' => $worklogs]);
+        return Response()->json(['ecode' => 0, 'data' => $worklogs, 'options' => [ 'current_time' => time() ]]);
     }
 
     /**
@@ -38,14 +40,14 @@ class WorklogController extends Controller
      */
     public function store(Request $request, $project_key, $issue_id)
     {
-        if (!Acl::isAllowed($this->user->id, 'add_worklog', $project_key)) {
+        if (!$this->isPermissionAllowed($project_key, 'add_worklog')) {
             return Response()->json(['ecode' => -10002, 'emsg' => 'permission denied.']);
         }
 
         $values = [];
 
         $spend = $request->input('spend');
-        if (!$spend || trim($spend) == '')
+        if (!$spend)
         {
             throw new \UnexpectedValueException('the spend-time can not be empty.', -11300);
         }
@@ -54,6 +56,7 @@ class WorklogController extends Controller
             throw new \UnexpectedValueException('the format of spend-time is incorrect.', -11301);
         }
         $values['spend'] = $this->ttHandle($spend);
+        $values['spend_m'] = $this->ttHandleInM($spend);
 
         $started_at = $request->input('started_at');
         if (!$started_at)
@@ -72,7 +75,7 @@ class WorklogController extends Controller
         if ($adjust_type == '3')
         {
             $leave_estimate = $request->input('leave_estimate');
-            if (!$leave_estimate || trim($leave_estimate) == '')
+            if (!$leave_estimate)
             {
                 throw new \UnexpectedValueException('the leave-estimate-time can not be empty.', -11304);
             }
@@ -82,12 +85,13 @@ class WorklogController extends Controller
                 throw new \UnexpectedValueException('the format of leave-estimate-time is incorrect.', -11305);
             }
             $values['leave_estimate'] = $this->ttHandle($leave_estimate);
+            $values['leave_estimate_m'] = $this->ttHandleInM($values['leave_estimate']);
         }
 
         if ($adjust_type == '4')
         {
             $cut = $request->input('cut');
-            if (!$cut || trim($cut) == '')
+            if (!$cut)
             {
                 throw new \UnexpectedValueException('the cut-time can not be empty.', -11306);
             }
@@ -97,6 +101,7 @@ class WorklogController extends Controller
                 throw new \UnexpectedValueException('the format of cut-time is incorrect.', -11307);
             }
             $values['cut'] = $this->ttHandle($cut);
+            $values['cut_m'] = $this->ttHandleInM($values['cut']);
         }
 
         $comments = $request->input('comments');
@@ -147,7 +152,7 @@ class WorklogController extends Controller
             throw new \UnexpectedValueException('the worklog does not exist or is not in the issue or is not in the project.', -11309);
         }
 
-        if (!Acl::isAllowed($this->user->id, 'manage_project', $project_key) && $worklog->recorder['id'] !== $this->user->id) 
+        if (!$this->isPermissionAllowed($project_key, 'edit_worklog') && !($worklog->recorder['id'] == $this->user->id && $this->isPermissionAllowed($project_key, 'edit_self_worklog'))) 
         {
             return Response()->json(['ecode' => -10002, 'emsg' => 'permission denied.']);
         }
@@ -156,7 +161,7 @@ class WorklogController extends Controller
         $spend = $request->input('spend');
         if (isset($spend))
         {
-            if (!$spend || trim($spend) == '')
+            if (!$spend)
             {
                 throw new \UnexpectedValueException('the spend-time can not be empty.', -11300);
             }
@@ -165,6 +170,7 @@ class WorklogController extends Controller
                 throw new \UnexpectedValueException('the format of spend-time is incorrect.', -11301);
             }
             $values['spend'] = $this->ttHandle($spend);
+            $values['spend_m'] = $this->ttHandleInM($spend);
         }
 
         $started_at = $request->input('started_at');
@@ -189,7 +195,7 @@ class WorklogController extends Controller
             if ($adjust_type == '3')
             {
                 $leave_estimate = $request->input('leave_estimate');
-                if (!$leave_estimate || trim($leave_estimate) == '')
+                if (!$leave_estimate)
                 {
                     throw new \UnexpectedValueException('the leave-estimate-time can not be empty.', -11304);
                 }
@@ -198,11 +204,12 @@ class WorklogController extends Controller
                     throw new \UnexpectedValueException('the format of leave-estimate-time is incorrect.', -11305);
                 }
                 $values['leave_estimate'] = $this->ttHandle($leave_estimate);
+                $values['leave_estimate_m'] = $this->ttHandleInM($values['leave_estimate']);
             } 
             else if ($adjust_type == '4')
             {
                 $cut = $request->input('cut');
-                if (!$cut || trim($cut) == '')
+                if (!$cut)
                 {
                     throw new \UnexpectedValueException('the cut-time can not be empty.', -11306);
                 }
@@ -212,6 +219,7 @@ class WorklogController extends Controller
                     throw new \UnexpectedValueException('the format of cut-time is incorrect.', -11307);
                 }
                 $values['cut'] = $this->ttHandle($cut);
+                $values['cut_m'] = $this->ttHandleInM($values['cut']);
             }
         }
 
@@ -244,7 +252,7 @@ class WorklogController extends Controller
             throw new \UnexpectedValueException('the worklog does not exist or is not in the issue or is not in the project.', -11309);
         }
 
-        if (!Acl::isAllowed($this->user->id, 'manage_project', $project_key) && $worklog->recorder['id'] !== $this->user->id) 
+        if (!$this->isPermissionAllowed($project_key, 'delete_worklog') && !($worklog->recorder['id'] == $this->user->id && $this->isPermissionAllowed($project_key, 'delete_self_worklog'))) 
         {
             return Response()->json(['ecode' => -10002, 'emsg' => 'permission denied.']);
         }

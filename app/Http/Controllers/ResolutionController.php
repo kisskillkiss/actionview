@@ -10,6 +10,7 @@ use App\Http\Requests;
 use App\Http\Controllers\Controller;
 use App\Customization\Eloquent\Resolution;
 use App\Customization\Eloquent\ResolutionProperty;
+use App\Project\Eloquent\Project;
 use App\Project\Provider;
 use DB;
 
@@ -39,7 +40,7 @@ class ResolutionController extends Controller
     public function store(Request $request, $project_key)
     {
         $name = $request->input('name');
-        if (!$name || trim($name) == '')
+        if (!$name)
         {
             throw new \UnexpectedValueException('the name can not be empty.', -12500);
         }
@@ -86,10 +87,15 @@ class ResolutionController extends Controller
             throw new \UnexpectedValueException('the resolution does not exist or is not in the project.', -12502);
         }
 
+        if (isset($resolution->key) && $resolution->key)
+        {
+            throw new \UnexpectedValueException('the resolution is built in the system.', -12504);
+        }
+
         $name = $request->input('name');
         if (isset($name))
         {
-            if (!$name || trim($name) == '')
+            if (!$name)
             {
                 throw new \UnexpectedValueException('the name can not be empty.', -12500);
             }
@@ -117,6 +123,11 @@ class ResolutionController extends Controller
         if (!$resolution || $project_key != $resolution->project_key)
         {
             throw new \UnexpectedValueException('the resolution does not exist or is not in the project.', -12502);
+        }
+
+        if (isset($resolution->key) && in_array($resolution->key, [ 'Unresolved', 'Fixed' ]))
+        {
+            throw new \UnexpectedValueException('the resolution is built in the system.', -12504);
         }
 
         $isUsed = $this->isFieldUsedByIssue($project_key, 'resolution', $resolution->toArray());
@@ -261,5 +272,34 @@ class ResolutionController extends Controller
         }
 
         return Response()->json(['ecode' => 0, 'data' => [ 'sequence' => $sequence ?: null, 'default' => $default_resolution_id ?: null ]]);
+    }
+
+    /**
+     * view the application in the all projects.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function viewUsedInProject($project_key, $id)
+    {
+        if ($project_key !== '$_sys_$')
+        {
+            return Response()->json(['ecode' => 0, 'data' => [] ]);
+        }
+
+        $res = [];
+        $projects = Project::all();
+        foreach($projects as $project)
+        {
+            $count = DB::collection('issue_' . $project->key)
+                ->where('resolution', $id)
+                ->where('del_flg', '<>', 1)
+                ->count();
+            if ($count > 0)
+            {
+                $res[] = [ 'key' => $project->key, 'name' => $project->name, 'status' => $project->status, 'issue_count' => $count ];
+            }
+        }
+
+        return Response()->json(['ecode' => 0, 'data' => $res ]);
     }
 }

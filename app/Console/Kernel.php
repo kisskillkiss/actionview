@@ -14,9 +14,9 @@ class Kernel extends ConsoleKernel
      */
     protected $commands = [
         'App\Console\Commands\SendEmails',
-        'App\Console\Commands\ImportCalendarSingular',
         'App\Console\Commands\SyncLdap',
-        'App\Console\Commands\SnapSprint'
+        'App\Console\Commands\SnapSprint',
+        'App\Console\Commands\RemoveLogs',
         // Commands\Inspire::class,
     ];
 
@@ -33,6 +33,8 @@ class Kernel extends ConsoleKernel
         $schedule->command('sprint:snap')
                  ->hourly();
         $schedule->command('ldap:sync')
+                 ->daily();
+        $schedule->command('logs:remove')
                  ->daily();
     }
 }

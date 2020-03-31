@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Customization\Eloquent\Type;
 use App\Workflow\Eloquent\Definition;
 use App\Workflow\Workflow;
+use App\Project\Eloquent\Project;
 use App\Project\Provider;
 
 class WorkflowController extends Controller
@@ -38,7 +39,7 @@ class WorkflowController extends Controller
     public function store(Request $request, $project_key)
     {
         $name = $request->input('name');
-        if (!$name || trim($name) == '')
+        if (!$name)
         {
             throw new \UnexpectedValueException('the name can not be empty.', -12100);
         }
@@ -82,7 +83,14 @@ class WorkflowController extends Controller
     public function preview(Request $request, $project_key, $id)
     {
         $workflow = Definition::find($id);
-        return Response()->json([ 'ecode' => 0, 'data' => $workflow ]);
+        if ($workflow)
+        {
+            return Response()->json([ 'ecode' => 0, 'data' => $workflow ]);
+        }
+        else
+        {
+            throw new \UnexpectedValueException('the workflow does not exist or is not in the project.', -12101);
+        }
     }
 
     /**
@@ -121,7 +129,7 @@ class WorkflowController extends Controller
         $name = $request->input('name');
         if (isset($name))
         {
-            if (!$name || trim($name) == '')
+            if (!$name)
             {
                 throw new \UnexpectedValueException('the name can not be empty.', -12100);
             }
@@ -171,5 +179,36 @@ class WorkflowController extends Controller
 
         Definition::destroy($id);
         return Response()->json([ 'ecode' => 0, 'data' => [ 'id' => $id ] ]);
+    }
+
+    /**
+     * view the application in the all projects.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function viewUsedInProject($project_key, $id)
+    {
+        if ($project_key !== '$_sys_$')
+        {
+            return Response()->json(['ecode' => 0, 'data' => [] ]);
+        }
+
+        $res = [];
+        $projects = Project::all();
+        foreach($projects as $project)
+        {
+            $types = Type::where('workflow_id', $id)
+                ->where('project_key', '<>', '$_sys_$')
+                ->where('project_key', $project->key)
+                ->get([ 'id', 'name' ])
+                ->toArray();
+
+            if ($types)
+            {
+                $res[] = [ 'key' => $project->key, 'name' => $project->name, 'status' => $project->status, 'types' => $types ];
+            }
+        }
+
+        return Response()->json(['ecode' => 0, 'data' => $res ]);
     }
 }

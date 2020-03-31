@@ -23,6 +23,7 @@ use Sentinel;
 use DB;
 
 use MongoDB\BSON\ObjectID;
+use MongoDB\Model\CollectionInfo;
 
 class ProjectController extends Controller
 {
@@ -41,28 +42,30 @@ class ProjectController extends Controller
     {
         // get bound groups
         $group_ids = array_column(Acl::getBoundGroups($this->user->id), 'id');
-        // fix me
         $user_projects = UserGroupProject::whereIn('ug_id', array_merge($group_ids, [ $this->user->id ]))
             ->where('link_count', '>', 0)
             ->get(['project_key'])
             ->toArray();
         $pkeys = array_column($user_projects, 'project_key');
 
+        // get latest access projects
         $accessed_projects = AccessProjectLog::where('user_id', $this->user->id)
             ->orderBy('latest_access_time', 'desc')
             ->get(['project_key'])
             ->toArray();
         $accessed_pkeys = array_column($accessed_projects, 'project_key');
 
-        $new_accessed_pkeys = array_intersect($accessed_pkeys, $pkeys);
+        $new_accessed_pkeys = array_unique(array_intersect($accessed_pkeys, $pkeys));
 
         $projects = [];
         foreach ($new_accessed_pkeys as $pkey)
         {
             $project = Project::where('key', $pkey)->first();
-            if ($project->status === 'closed') {
+            if (!$project || $project->status === 'closed') 
+            {
                 continue;
             }
+
             $projects[] = [ 'key' => $project->key, 'name' => $project->name ];
             if (count($projects) >= 5) { break; }
         }
@@ -86,7 +89,7 @@ class ProjectController extends Controller
             ->get(['project_key'])
             ->toArray();
 
-        $pkeys = array_unique(array_column($user_projects, 'project_key'));
+        $pkeys = array_values(array_unique(array_column($user_projects, 'project_key')));
 
         $offset_key = $request->input('offset_key');
         if (isset($offset_key))
@@ -116,10 +119,6 @@ class ProjectController extends Controller
         }
 
         $name = $request->input('name');
-        if (isset($name) && $name)
-        {
-            $name = trim($name);
-        }
 
         $projects = [];
         foreach ($pkeys as $pkey)
@@ -127,8 +126,7 @@ class ProjectController extends Controller
             $query = Project::where('key', $pkey);
             if ($name)
             {
-                $query->where(function ($query) use ($name)
-                {
+                $query->where(function ($query) use ($name) {
                     $query->where('key', 'like', '%' . $name . '%')->orWhere('name', 'like', '%' . $name . '%');
                 });
             }
@@ -201,24 +199,35 @@ class ProjectController extends Controller
         }
 
         Schema::collection('issue_' . $project->key, function($col) {
-          $col->index('type');
-          $col->index('state');
-          $col->index('resolution');
-          $col->index('priority');
-          $col->index('created_at');
-          $col->index('updated_at');
-          $col->index('module');
-          $col->index('resolve_version');
-          $col->index('no');
-          $col->index('parent_id');
-          $col->index('assignee.id');
-          $col->index('reporter.id');
+            $col->index('type');
+            $col->index('state');
+            $col->index('resolution');
+            $col->index('priority');
+            $col->index('created_at');
+            $col->index('updated_at');
+            $col->index('epic');
+            $col->index('module');
+            $col->index('resolve_version');
+            $col->index('labels');
+            $col->index('no');
+            $col->index('parent_id');
+            $col->index('assignee.id');
+            $col->index('reporter.id');
         });
         Schema::collection('activity_' . $project->key, function($col) {
-          $col->index('event_key');
+            $col->index('event_key');
         });
         Schema::collection('comments_' . $project->key, function($col) {
-          $col->index('issue_id');
+            $col->index('issue_id');
+        });
+        Schema::collection('issue_his_' . $project->key, function($col) {
+            $col->index('issue_id');
+        });
+        Schema::collection('document_' . $project->key, function($col) {
+            $col->index('parent');
+        });
+        Schema::collection('wiki_' . $project->key, function($col) {
+            $col->index('parent');
         });
 
         return Response()->json([ 'ecode' => 0, 'data' => $project ]);
@@ -246,23 +255,34 @@ class ProjectController extends Controller
             }
 
             Schema::collection('issue_' . $project->key, function($col) {
-              $col->index('type');
-              $col->index('state');
-              $col->index('resolution');
-              $col->index('priority');
-              $col->index('created_at');
-              $col->index('updated_at');
-              $col->index('module');
-              $col->index('resolve_version');
-              $col->index('no');
-              $col->index('assignee.id');
-              $col->index('reporter.id');
+                $col->index('type');
+                $col->index('state');
+                $col->index('resolution');
+                $col->index('priority');
+                $col->index('created_at');
+                $col->index('updated_at');
+                $col->index('module');
+                $col->index('epic');
+                $col->index('resolve_version');
+                $col->index('labels');
+                $col->index('no');
+                $col->index('assignee.id');
+                $col->index('reporter.id');
             });
             Schema::collection('activity_' . $project->key, function($col) {
-              $col->index('event_key');
+                $col->index('event_key');
             });
             Schema::collection('comments_' . $project->key, function($col) {
-              $col->index('issue_id');
+                $col->index('issue_id');
+            });
+            Schema::collection('issue_his_' . $project->key, function($col) {
+                $col->index('issue_id');
+            });
+            Schema::collection('document_' . $project->key, function($col) {
+                $col->index('parent');
+            });
+            Schema::collection('wiki_' . $project->key, function($col) {
+                $col->index('parent');
             });
         }
         return Response()->json([ 'ecode' => 0, 'data' => [ 'ids' => $ids ] ]);
@@ -299,6 +319,28 @@ class ProjectController extends Controller
     }
 
     /**
+     * search project by the name or code.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function search(Request $request)
+    {
+        $query = DB::collection('project');
+
+        $s = $request->input('s');
+        if (isset($s) && $s)
+        {
+            $query->where(function ($query) use ($s) {
+                $query->where('key', 'like', '%' . $s . '%')->orWhere('name', 'like', '%' . $s . '%');
+            });
+        }
+
+        $projects = $query->take(10)->get([ 'name', 'key' ]);
+
+        return Response()->json([ 'ecode' => 0, 'data' => parent::arrange($projects) ]);
+    }
+
+    /**
      * Display a listing of the resource.
      *
      * @return \Illuminate\Http\Response
@@ -320,9 +362,8 @@ class ProjectController extends Controller
         }
 
         $name = $request->input('name');
-        if (isset($name) && trim($name))
+        if (isset($name) && $name)
         {
-            $name = trim($name);
             $query->where(function ($query) use ($name) {
                 $query->where('key', 'like', '%' . $name . '%')->orWhere('name', 'like', '%' . $name . '%');
             });
@@ -336,7 +377,7 @@ class ProjectController extends Controller
         $page_size = 30;
         $page = $request->input('page') ?: 1;
         $query = $query->skip($page_size * ($page - 1))->take($page_size);
-        $projects = $query->get([ 'name', 'key', 'status', 'principal' ]);
+        $projects = $query->get([ 'name', 'key', 'description', 'status', 'principal' ]);
         foreach ($projects as $key => $project)
         {
             $projects[$key]['principal']['nameAndEmail'] = $project['principal']['name'] . '(' . $project['principal']['email'] . ')';
@@ -363,14 +404,14 @@ class ProjectController extends Controller
         $insValues = [];
 
         $name = $request->input('name');
-        if (!$name || trim($name) == '')
+        if (!$name)
         {
             throw new \UnexpectedValueException('the name can not be empty.', -14000);
         }
-        $insValues['name'] = trim($name);
+        $insValues['name'] = $name;
 
         $key = $request->input('key');
-        if (!$key || trim($key) == '')
+        if (!$key)
         {
             throw new \InvalidArgumentException('project key cannot be empty.', -14001);
         }
@@ -378,7 +419,7 @@ class ProjectController extends Controller
         {
             throw new \InvalidArgumentException('project key has been taken.', -14002);
         }
-        $insValues['key'] = trim($key);
+        $insValues['key'] = $key;
 
         $principal = $request->input('principal');
         if (!isset($principal) || !$principal)
@@ -396,9 +437,9 @@ class ProjectController extends Controller
         }
 
         $description = $request->input('description');
-        if (isset($description) && trim($description))
+        if (isset($description) && $description)
         {
-            $insValues['description'] = trim($description);
+            $insValues['description'] = $description;
         }
 
         $insValues['category'] = 1;
@@ -457,7 +498,7 @@ class ProjectController extends Controller
 
         // get action allow of the project.
         $permissions = Acl::getPermissions($this->user->id, $project->key);
-        if ($this->user->id === $project->principal['id'])
+        if ($this->user->id === $project->principal['id'] || $this->user->email === 'admin@action.view')
         {
             !in_array('view_project', $permissions) && $permissions[] = 'view_project';
             !in_array('manage_project', $permissions) && $permissions[] = 'manage_project';
@@ -516,11 +557,11 @@ class ProjectController extends Controller
         $name = $request->input('name');
         if (isset($name))
         {
-            if (!$name || trim($name) == '')
+            if (!$name)
             {
                 throw new \UnexpectedValueException('the name can not be empty.', -14000);
             }
-            $updValues['name'] = trim($name);
+            $updValues['name'] = $name;
         }
         // check is user is available
         $principal = $request->input('principal');
@@ -540,9 +581,9 @@ class ProjectController extends Controller
         }
 
         $description = $request->input('description');
-        if (isset($description) && trim($description))
+        if (isset($description))
         {
-            $updValues['description'] = trim($description);
+            $updValues['description'] = $description;
         }
 
         $status = $request->input('status');
@@ -584,7 +625,43 @@ class ProjectController extends Controller
      */
     public function destroy($id)
     {
+    	$project = Project::find($id);
+        if (!$project)
+        {
+            throw new \UnexpectedValueException('the project does not exist.', -14004);
+        }
+
+        $project_key = $project->key;
+        //$related_cols = [ 'version', 'module', 'board', 'epic', 'sprint', 'sprint_log', 'searcher', 'access_project_log', 'access_board_log', 'user_group_project', 'watch', 'acl_role', 'acl_roleactor', 'acl_role_permissions', 'oswf_definition' ];
+        $unrelated_cols = [ 'system.indexes', 'users', 'persistences', 'throttle', 'project' ];
+        // delete releted table
+        $collections = DB::listCollections();
+        foreach ($collections as $col)
+        {
+            $col_name = $col->getName();
+            if (strpos($col_name, 'issue_') === 0 ||
+                strpos($col_name, 'activity_') === 0 ||
+                strpos($col_name, 'comments_') === 0 ||
+                strpos($col_name, 'document_') === 0 ||
+                strpos($col_name, 'wiki_') === 0 ||
+                in_array($col_name, $unrelated_cols))
+            {
+                continue;
+            }
+    
+            DB::collection($col_name)->where('project_key', $project_key)->delete();
+        }
+
+        // delete the collections
+        Schema::drop('issue_' . $project_key);
+        Schema::drop('issue_his_' . $project_key);
+        Schema::drop('activity_' . $project_key);
+        Schema::drop('comments_' . $project_key);
+        Schema::drop('document_' . $project_key);
+        Schema::drop('wiki_' . $project_key);
+        // delete from the project table
         Project::destroy($id);
+
         return Response()->json([ 'ecode' => 0, 'data' => [ 'id' => $id ] ]);
     }
 

@@ -15,8 +15,8 @@ class HistoryStep extends Model
         'start_time',
         'finish_time',
         'action_id',
-        'owner',
         'status',
+        'owner',
         'comments',
         'caller'
     );

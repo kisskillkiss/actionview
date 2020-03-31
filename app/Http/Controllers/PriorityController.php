@@ -10,6 +10,7 @@ use App\Http\Requests;
 use App\Http\Controllers\Controller;
 use App\Customization\Eloquent\Priority;
 use App\Customization\Eloquent\PriorityProperty;
+use App\Project\Eloquent\Project;
 use App\Project\Provider;
 use DB;
 
@@ -39,7 +40,7 @@ class PriorityController extends Controller
     public function store(Request $request, $project_key)
     {
         $name = $request->input('name');
-        if (!$name || trim($name) == '')
+        if (!$name)
         {
             throw new \UnexpectedValueException('the name can not be empty.', -12600);
         }
@@ -86,10 +87,15 @@ class PriorityController extends Controller
             throw new \UnexpectedValueException('the priority does not exist or is not in the project.', -12602);
         }
 
+        if (isset($priority->key) && $priority->key)
+        {
+            throw new \UnexpectedValueException('the priority is built in the system.', -12604);
+        }
+
         $name = $request->input('name');
         if (isset($name))
         {
-            if (!$name || trim($name) == '')
+            if (!$name)
             {
                 throw new \UnexpectedValueException('the name can not be empty.', -12600);
             }
@@ -118,6 +124,11 @@ class PriorityController extends Controller
         {
             throw new \UnexpectedValueException('the priority does not exist or is not in the project.', -12602);
         }
+
+        //if (isset($priority->key) && $priority->key)
+        //{
+        //    throw new \UnexpectedValueException('the priority is built in the system.', -12604);
+        //}
 
         $isUsed = $this->isFieldUsedByIssue($project_key, 'priority', $priority->toArray()); 
         if ($isUsed)
@@ -261,5 +272,34 @@ class PriorityController extends Controller
         }
 
         return Response()->json(['ecode' => 0, 'data' => [ 'sequence' => $sequence ?: null, 'default' => $default_priority_id ?: null ]]);
+    }
+
+    /**
+     * view the application in the all projects.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function viewUsedInProject($project_key, $id)
+    {
+        if ($project_key !== '$_sys_$')
+        {
+            return Response()->json(['ecode' => 0, 'data' => [] ]);
+        }
+
+        $res = [];
+        $projects = Project::all();
+        foreach($projects as $project)
+        {
+            $count = DB::collection('issue_' . $project->key)
+                ->where('priority', $id)
+                ->where('del_flg', '<>', 1)
+                ->count();
+            if ($count > 0)
+            {
+                $res[] = [ 'key' => $project->key, 'name' => $project->name, 'status' => $project->status, 'issue_count' => $count ];
+            }
+        }
+
+        return Response()->json(['ecode' => 0, 'data' => $res ]);
     }
 }

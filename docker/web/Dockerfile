@@ -16,6 +16,7 @@ RUN apt-get update && \
         php-mcrypt\
         php-curl\
         php-dom\
+        php-zip\
         php-ldap\
         php-mongodb\
         cron
@@ -38,11 +39,9 @@ ADD conf/000-default.conf /etc/apache2/sites-available/000-default.conf
 
 ADD conf/crontabfile /var/www/actionview/crontabfile 
 
-ADD scripts/run.sh /run.sh
-RUN chmod a+x /run.sh
-
-EXPOSE 80
+ADD scripts /scripts
+RUN chmod a+x /scripts/*.sh
 
 VOLUME ["/var/www/actionview/storage", "/var/log/apache2"]  
- 
-CMD ["/run.sh"]
+
+CMD ["/scripts/run.sh"]

@@ -116,7 +116,7 @@ class Func
         $roles = Acl::getRolesByUid($project_key, $caller);
         foreach ($roles as $role)
         {
-            if ($role->id === $param['roleParam'])
+            if ($role === $param['roleParam'])
             {
                 return true;
             }
@@ -254,6 +254,11 @@ class Func
             // snap to history
             $snap_id = Provider::snap2His($project_key, $issue_id, null, array_keys(self::$issue_properties));
 
+            //if (!isset($param['eventParam']) || !$param['eventParam'])
+            //{
+            //    Event::fire(new IssueEvent($project_key, $issue_id, $updValues['modifier'], [ 'event_key' => 'normal', 'snap_id' => $snap_id ]));
+            //}
+
             self::$snap_id = $snap_id;
         }
     }
@@ -268,10 +273,58 @@ class Func
     {
         $issue_id = $param['issue_id'];
         $project_key = $param['project_key'];
+        $event_key = array_get($param, 'eventParam', 'normal'); 
 
         $user_info = Sentinel::findById($param['caller']);
         $caller = [ 'id' => $user_info->id, 'name' => $user_info->first_name, 'email' => $user_info->email ];
 
-        Event::fire(new IssueEvent($project_key, $issue_id, $caller, [ 'event_key' => $param['eventParam'], 'snap_id' => self::$snap_id ]));
+        if (self::$snap_id) 
+        {
+            Event::fire(new IssueEvent($project_key, $issue_id, $caller, [ 'event_key' => $event_key, 'snap_id' => self::$snap_id ]));
+        }
+
+        $updValues = [];
+        if ($event_key === 'resolve_issue')
+        {
+            $updValues['resolved_at'] = time();
+            $updValues['resolver'] = $caller;
+
+            $issue = DB::collection('issue_' . $project_key)->where('_id', $issue_id)->first();
+            if (isset($issue['regression_times']) && $issue['regression_times'])
+            {
+                $updValues['regression_times'] = $issue['regression_times'] + 1;
+            }
+            else
+            {
+                $updValues['regression_times'] = 1;
+            }
+            
+            $logs = [];
+            if (isset($issue['resolved_logs']) && $issue['resolved_logs'])
+            {
+                $logs = $issue['resolved_logs'];
+            }
+            $log = [];
+            $log['user'] = $caller;
+            $log['at'] = time();
+            $logs[] = $log;
+            $updValues['resolved_logs'] = $logs;
+
+            $his_resolvers = [];
+            foreach($logs as $v)
+            {
+                $his_resolvers[] = $v['user']['id'];
+            }
+            $updValues['his_resolvers'] = array_unique($his_resolvers);
+        }
+        else if ($event_key === 'close_issue')
+        {
+            $updValues['closed_at'] = time();
+            $updValues['closer'] = $caller;
+        }
+        if ($updValues)
+        {
+            DB::collection('issue_' . $project_key)->where('_id', $issue_id)->update($updValues);
+        }
     }
 }

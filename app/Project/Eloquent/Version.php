@@ -14,6 +14,8 @@ class Version extends Model
         'project_key',
         'start_time',
         'end_time',
+        'released_time',
+        'status',
         'creator',
         'description'
     );

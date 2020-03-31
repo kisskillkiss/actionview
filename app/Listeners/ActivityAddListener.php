@@ -6,6 +6,9 @@ use App\Events\FileUploadEvent;
 use App\Events\FileDelEvent;
 use App\Events\IssueEvent;
 use App\Events\VersionEvent;
+use App\Events\SprintEvent;
+use App\Events\WikiEvent;
+use App\Events\DcoumentEvent;
 use App\Events\ModuleEvent;
 use App\Project\Provider;
 
@@ -52,13 +55,13 @@ class ActivityAddListener
             $activity_id = $this->addIssueActivity($event->project_key, $event->issue_id, $event->user, $event->param);
             $this->putMQ($event->project_key, $activity_id);
         }
-        else if ($event instanceof VersionEvent)
+        else if ($event instanceof VersionEvent || $event instanceof SprintEvent || $event instanceof WikiEvent)
         {
-            $this->addProjectActivity($event->project_key, $event->user, $event->param);
-        }
-        else if ($event instanceof ModuleEvent)
-        {
-            $this->addProjectActivity($event->project_key, $event->user, $event->param);
+            $activity_id = $this->addProjectActivity($event->project_key, $event->user, $event->param);
+            if (isset($event->param['isSendMsg']) && $event->param['isSendMsg'])
+            {
+                $this->putMQ($event->project_key, $activity_id);
+            }
         }
     }
 
@@ -75,7 +78,7 @@ class ActivityAddListener
     public function addFileActivity($project_key, $issue_id, $user, $file_id, $event_key)
     {
         $file_info = File::find($file_id);
-        if (!$file_info)
+        if (!$file_info || $file_info->del_flg == 1)
         {
             return;
         }

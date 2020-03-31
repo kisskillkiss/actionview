@@ -22,10 +22,13 @@ Route::delete('api/session', 'SessionController@destroy');
 
 Route::post('api/user/register', 'UserController@register');
 
-Route::get('user/{id}/resetpwd', 'UserController@showResetpwd'); //fix me
-Route::post('user/{id}/resetpwd', 'UserController@doResetpwd'); // fix me
-
-Route::get('api/addadmin/{id}', 'SyssettingController@addAdmin'); // delete me
+Route::post('api/user/resetpwdsendmail', 'UserController@sendMailForResetpwd');
+Route::get('api/user/resetpwd', 'UserController@showResetpwd');
+Route::post('api/user/resetpwd', 'UserController@doResetpwd');
+// holida api
+Route::get('api/holiday/{year}', 'HolidayController@index');
+// webhook api
+Route::post('api/webhook/{type}/project/{key}', 'WebhookController@exec');
 
 Route::group([ 'middleware' => 'can' ], function () {
     // project route
@@ -34,6 +37,7 @@ Route::group([ 'middleware' => 'can' ], function () {
     Route::get('api/project', 'ProjectController@index');
     Route::get('api/project/checkkey/{key}', 'ProjectController@checkKey');
     Route::get('api/project/options', 'ProjectController@getOptions');
+    Route::get('api/project/search', 'ProjectController@search');
     Route::get('api/project/{key}', 'ProjectController@show');
     Route::post('api/project', 'ProjectController@store');
     Route::put('api/project/{id}', 'ProjectController@update');
@@ -49,6 +53,12 @@ Route::group([ 'middleware' => 'can' ], function () {
     Route::post('api/user/fileupload', 'UserController@upload');
     Route::post('api/user/imports', 'UserController@imports');
     Route::resource('api/user', 'UserController');
+
+    Route::get('api/logs', 'AccessLogsController@index');
+
+    Route::get('api/calendar/{year}', 'CalendarController@index');
+    Route::post('api/calendar', 'CalendarController@update');
+    Route::post('api/calendar/sync', 'CalendarController@sync');
 
     Route::get('api/group/search', 'GroupController@search');
     Route::post('api/group/batch/delete', 'GroupController@delMultiGroups');
@@ -72,7 +82,7 @@ Route::group([ 'middleware' => 'can' ], function () {
     Route::post('api/syssetting/sendtestmail', 'SyssettingController@sendTestMail');
 
     Route::get('api/getavatar', 'FileController@getAvatar');
-    Route::get('api/downloadusertpl', 'UserController@downloadUserTpl');
+    Route::post('api/tmpfile', 'FileController@uploadTmpFile');
 });
 
 // project config
@@ -82,31 +92,41 @@ Route::group([ 'prefix' => 'api/project/{project_key}', 'middleware' => [ 'can',
     Route::post('type/batch', 'TypeController@handle');
     // project field config
     Route::resource('field', 'FieldController');
+    Route::get('field/{id}/used', 'FieldController@viewUsedInProject');
     // project screen config
     Route::resource('screen', 'ScreenController');
+    Route::get('screen/{id}/used', 'ScreenController@viewUsedInProject');
     // project workflow config
     Route::resource('workflow', 'WorkflowController');
+    Route::get('workflow/{id}/used', 'WorkflowController@viewUsedInProject');
     // project role config
     Route::get('role/{id}/reset', 'RoleController@reset');
     Route::post('role/{id}/permissions', 'RoleController@setPermissions');
     Route::post('role/{id}/actor', 'RoleController@setActor');
     Route::post('role/{id}/groupactor', 'RoleController@setGroupActor');
     Route::resource('role', 'RoleController');
+    Route::get('role/{id}/used', 'RoleController@viewUsedInProject');
     // project event config
     Route::get('events/{event_id}/reset', 'EventsController@reset');
     Route::post('events/{event_id}/notify', 'EventsController@setNotify');
     Route::resource('events', 'EventsController');
     // project priority config
     Route::resource('priority', 'PriorityController');
+    Route::get('priority/{id}/used', 'PriorityController@viewUsedInProject');
     Route::post('priority/batch', 'PriorityController@handle');
     // project state config
     Route::resource('state', 'StateController');
     Route::post('state/batch', 'StateController@handle');
+    Route::get('state/{id}/used', 'StateController@viewUsedInProject');
     // project resolution config
     Route::resource('resolution', 'ResolutionController');
+    Route::get('resolution/{id}/used', 'ResolutionController@viewUsedInProject');
     Route::post('resolution/batch', 'ResolutionController@handle');
-    // Route::resource('module', 'ModuleController', [ 'only' => [ 'store', 'update', 'destory' ] ]);
-    // Route::resource('version', 'VersionController', [ 'only' => [ 'store', 'update', 'destory' ] ]);
+
+    Route::get('integrations', 'ExternalUsersController@index');
+    Route::post('integrations', 'ExternalUsersController@handle');
+
+    Route::resource('webhooks', 'WebhooksController');
 });
 
 Route::group([ 'prefix' => 'api/project/{project_key}', 'middleware' => [ 'can', 'privilege:view_project' ] ], function () {
@@ -117,20 +137,46 @@ Route::group([ 'prefix' => 'api/project/{project_key}', 'middleware' => [ 'can',
     // project activity
     Route::get('activity', 'ActivityController@index');
     // project module config
+    Route::post('module/{id}/delete', 'ModuleController@delete');
     Route::resource('module', 'ModuleController');
     Route::post('module/batch', 'ModuleController@handle');
     // project version config
+    Route::post('version/merge', 'VersionController@merge');
+    Route::post('version/{id}/release', 'VersionController@release');
+    Route::post('version/{id}/delete', 'VersionController@delete');
     Route::resource('version', 'VersionController');
+    // project report 
+    Route::get('report/index', 'ReportController@index');
+    Route::get('report/trend', 'ReportController@getTrends');
+    Route::get('report/worklog', 'ReportController@getWorklogs');
+    Route::get('report/worklog/list', 'ReportController@getWorklogList');
+    Route::get('report/worklog/issue/{issue_id}', 'ReportController@getWorklogDetail');
+    Route::get('report/timetracks', 'ReportController@getTimetracks');
+    Route::get('report/timetracks/issue/{issue_id}', 'ReportController@getTimetracksDetail');
+    Route::get('report/regressions', 'ReportController@getRegressions');
+    Route::get('report/issues', 'ReportController@getIssues');
+    Route::get('report/{mode}/filters/reset', 'ReportController@resetSomeFilters');
+    Route::post('report/{mode}/filters', 'ReportController@editSomeFilters');
+    Route::post('report/{mode}/filter', 'ReportController@saveFilter');
     // project team
     Route::get('team', 'RoleController@index');
     // preview the workflow chart 
     Route::get('workflow/{id}/preview', 'WorkflowController@preview');
 
-    Route::get('issue/searcher', 'IssueController@getSearchers');
-    Route::post('issue/searcher', 'IssueController@addSearcher');
-    Route::post('issue/searcher/batch', 'IssueController@handleSearcher');
     Route::get('issue/options', 'IssueController@getOptions');
     Route::get('issue/search', 'IssueController@search');
+
+    Route::post('issue/filter', 'IssueController@saveIssueFilter');
+    Route::get('issue/filters', 'IssueController@getIssueFilters');
+    Route::get('issue/filters/reset', 'IssueController@resetIssueFilters');
+    Route::post('issue/filters', 'IssueController@editFilters');
+
+    Route::post('issue/columns', 'IssueController@setDisplayColumns');
+    Route::post('issue/columns/reset', 'IssueController@resetDisplayColumns');
+
+    Route::post('issue/imports', 'IssueController@imports');
+
+    Route::post('issue/batch', 'IssueController@batchHandle');
 
     Route::get('issue/{id}', 'IssueController@show');
     Route::get('issue', 'IssueController@index');
@@ -142,17 +188,20 @@ Route::group([ 'prefix' => 'api/project/{project_key}', 'middleware' => [ 'can',
     Route::get('issue/{id}/history', 'IssueController@getHistory');
     Route::post('issue/{id}/watching', 'IssueController@watch');
 
-    Route::post('issue/{id}/workflow/{workflow_id}/action/{action_id}', [ 'middleware' => 'privilege:exec_workflow', 'uses' => 'IssueController@doAction' ]);
+    Route::post('issue/{id}/workflow/{workflow_id}', [ 'middleware' => 'privilege:exec_workflow', 'uses' => 'IssueController@doAction' ]);
     Route::post('issue/{id}/assign', [ 'uses' => 'IssueController@setAssignee' ]); // this middleware is put into the action
+    Route::post('issue/{id}/labels', [ 'uses' => 'IssueController@setLabels' ]); // this middleware is put into the action
     Route::post('issue/{id}/move', [ 'middleware' => 'privilege:move_issue', 'uses' => 'IssueController@move' ]);
     Route::post('issue/copy', [ 'middleware' => 'privilege:create_issue', 'uses' => 'IssueController@copy' ]);
     Route::post('issue/{id}/convert', [ 'middleware' => 'privilege:edit_issue', 'uses' => 'IssueController@convert' ]);
-    Route::get('issue/{id}/reset', [ 'middleware' => 'privilege:reset_issue', 'uses' => 'IssueController@resetState' ]);
+    Route::post('issue/{id}/reset', [ 'middleware' => 'privilege:reset_issue', 'uses' => 'IssueController@resetState' ]);
 
     Route::get('issue/{id}/wfactions', 'IssueController@wfactions');
 
     Route::resource('issue/{id}/comments', 'CommentsController');
     Route::resource('issue/{id}/worklog', 'WorklogController');
+
+    Route::get('issue/{id}/gitcommits', 'WebhookController@index');
 
     Route::post('issue/release', 'IssueController@release');
 
@@ -160,9 +209,34 @@ Route::group([ 'prefix' => 'api/project/{project_key}', 'middleware' => [ 'can',
     Route::delete('link/{id}', 'LinkController@destroy');
 
     Route::post('file', [ 'middleware' => 'privilege:upload_file', 'uses' => 'FileController@upload' ]);
-    Route::get('file/{id}/thumbnail', [ 'middleware' => 'privilege:view_project', 'uses' => 'FileController@downloadThumbnail' ]);
+    Route::get('file/{id}/thumbnail', 'FileController@downloadThumbnail');
     Route::get('file/{id}', [ 'middleware' => 'privilege:download_file', 'uses' => 'FileController@download' ]);
-    Route::delete('file/{id}', [ 'middleware' => 'privilege:remove_file', 'uses' => 'FileController@delete' ]);
+    Route::delete('file/{id}', 'FileController@delete');
+
+    Route::post('document/{id}/upload', 'DocumentController@upload');
+    Route::get('document/{id}/download', 'DocumentController@download');
+    Route::get('document/options', 'DocumentController@getOptions');
+    Route::get('document/directory/{id}', 'DocumentController@index');
+    Route::get('document/search/path', 'DocumentController@searchPath');
+    Route::post('document/move', 'DocumentController@move');
+    Route::post('document/{id}', [ 'middleware' => 'privilege:manage_project', 'uses' => 'DocumentController@createFolder' ]);
+    Route::put('document/{id}', 'DocumentController@update');
+    Route::delete('document/{id}', 'DocumentController@destroy');
+
+    Route::post('wiki/{id}/upload', 'WikiController@upload');
+    Route::get('wiki/{id}/download', 'WikiController@download2');
+    Route::get('wiki/{id}/file/{fid}/download', 'WikiController@download');
+    Route::delete('wiki/{id}/file/{fid}', 'WikiController@remove');
+    Route::get('wiki/directory/{id}', 'WikiController@index');
+    Route::get('wiki/search/path', 'WikiController@searchPath');
+    Route::get('wiki/{id}', 'WikiController@show');
+    Route::post('wiki/move', 'WikiController@move');
+    Route::post('wiki/copy', 'WikiController@copy');
+    Route::post('wiki', 'WikiController@create');
+    Route::put('wiki/{id}', 'WikiController@update');
+    Route::get('wiki/{id}/checkin', 'WikiController@checkin');
+    Route::get('wiki/{id}/checkout', 'WikiController@checkout');
+    Route::delete('wiki/{id}', 'WikiController@destroy');
 
     Route::resource('kanban', 'BoardController');
     Route::get('kanban/{id}/access', 'BoardController@recordAccess');
@@ -177,6 +251,7 @@ Route::group([ 'prefix' => 'api/project/{project_key}', 'middleware' => [ 'can',
     Route::delete('sprint/{no}', 'SprintController@destroy');
 
     // project module config
+    Route::post('epic/{id}/delete', 'EpicController@delete');
     Route::resource('epic', 'EpicController');
     Route::post('epic/batch', 'EpicController@handle');
 });

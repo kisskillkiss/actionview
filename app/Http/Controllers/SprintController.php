@@ -2,6 +2,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 
 use App\Http\Requests;
 use App\Http\Controllers\Controller;
@@ -9,7 +10,8 @@ use App\Project\Eloquent\Sprint;
 use App\Project\Eloquent\SprintDayLog;
 use App\Project\Eloquent\Board;
 use App\Project\Provider;
-use App\Customization\Eloquent\CalendarSingular;
+use App\Events\SprintEvent;
+use App\System\Eloquent\CalendarSingular;
 use DB;
 
 class SprintController extends Controller
@@ -184,6 +186,12 @@ class SprintController extends Controller
             throw new \UnexpectedValueException('the sprint complete time cannot be empty.', -11710);
         }
 
+        $description = $request->input('description');
+        if (isset($description) && $description)
+        {
+            $updValues['description'] = $description;
+        }
+
         $kanban_id = $request->input('kanban_id');
         if (!isset($kanban_id) || !$kanban_id)
         {
@@ -201,6 +209,10 @@ class SprintController extends Controller
         {
             $this->pushSprint($project_key, $issue_no, $no);
         }
+
+        $isSendMsg = $request->input('isSendMsg') && true;
+        $user = [ 'id' => $this->user->id, 'name' => $this->user->first_name, 'email' => $this->user->email ];
+        Event::fire(new SprintEvent($project_key, $user, [ 'event_key' => 'start_sprint', 'isSendMsg' => $isSendMsg, 'data' => [ 'sprint_no' => $no ] ]));
 
         return Response()->json([ 'ecode' => 0, 'data' => $this->getValidSprintList($project_key) ]);
     }
@@ -239,6 +251,13 @@ class SprintController extends Controller
 
         $incompleted_issues = array_values(array_diff($sprint->issues, $completed_issues));
 
+        $valid_incompleted_issues = DB::collection('issue_' . $project_key)->whereIn('no', $incompleted_issues)->where('del_flg', '<>', 1)->get([ 'no' ]);
+        if ($valid_incompleted_issues)
+        {
+    	    $valid_incompleted_issues = array_column($valid_incompleted_issues, 'no');
+    	    $incompleted_issues = array_values(array_intersect($incompleted_issues, $valid_incompleted_issues));
+        }
+
         $updValues = [ 
             'status' => 'completed', 
             'real_complete_time' => time(), 
@@ -257,6 +276,10 @@ class SprintController extends Controller
                 $next_sprint->fill([ 'issues' => $issues ])->save();
             }
         }
+
+        $isSendMsg = $request->input('isSendMsg') && true;
+        $user = [ 'id' => $this->user->id, 'name' => $this->user->first_name, 'email' => $this->user->email ];
+        Event::fire(new SprintEvent($project_key, $user, [ 'event_key' => 'complete_sprint', 'isSendMsg' => $isSendMsg, 'data' => [ 'sprint_no' => $no ] ]));
 
         return Response()->json([ 'ecode' => 0, 'data' => $this->getValidSprintList($project_key) ]);
     }
@@ -568,11 +591,11 @@ class SprintController extends Controller
             $tmp_time += 24 * 60 * 60;
         }
 
-        $singulars = CalendarSingular::where([ 'day' => [ '$in' => $days ] ])->get();
+        $singulars = CalendarSingular::where([ 'date' => [ '$in' => $days ] ])->get();
         foreach ($singulars as $singular)
         {
-            $tmp = $singular->day;
-            $workingDays[$tmp] = $singular->flag;
+            $tmp = $singular->date;
+            $workingDays[$tmp] = $singular->type == 'holiday' ? 0 : 1;
         }
         return $workingDays;
     }
